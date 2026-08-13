@@ -3,7 +3,7 @@ import time
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.agent.claude_client import AgentError, generate_grounded_answer
+from app.agent.router import AgentError, generate_grounded_answer
 from app.config import get_settings
 from app.db import get_db
 from app.models import Conversation, Message, RetrievalAuditLog

@@ -14,12 +14,20 @@ services:
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
+      # "anthropic" (default) or "nvidia" — see NVIDIA_* vars below if you pick nvidia.
+      - key: LLM_PROVIDER
+        value: anthropic
       - key: ANTHROPIC_API_KEY
         sync: false # set this manually in the Render dashboard — never commit it
       - key: AGENT_MODEL
         value: claude-sonnet-4-6
       - key: CLASSIFIER_MODEL
         value: claude-haiku-4-5
+      # Only read when LLM_PROVIDER=nvidia. Free key at build.nvidia.com.
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: NVIDIA_MODEL
+        value: meta/llama-3.1-70b-instruct
       # SQLite lives on local disk, which Render's free tier does not persist
       # across deploys/restarts. That's fine for testing (conversation
       # history resets on redeploy); for anything longer-lived, point this at

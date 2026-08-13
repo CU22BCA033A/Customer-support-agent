@@ -76,15 +76,37 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# edit .env and set ANTHROPIC_API_KEY
+# edit .env and set an API key for whichever LLM_PROVIDER you're using
+# (see "Choosing an LLM provider" below)
 
-python scripts/ingest.py        # builds the Chroma index from knowledge_base/*.md
 uvicorn app.main:app --reload --port 8000
 ```
 
-The first `ingest.py` run downloads a small (~80MB) local embedding model
-(`all-MiniLM-L6-v2`, via Chroma's built-in ONNX embedding function) — no external API calls
-and no GPU required, so retrieval works fully offline once cached.
+The vector index rebuilds automatically from `knowledge_base/*.md` every time the server
+starts — no separate ingestion step needed (though `python scripts/ingest.py` still works
+standalone if you want to rebuild it without restarting the server). The first run downloads
+a small (~80MB) local embedding model (`all-MiniLM-L6-v2`, via Chroma's built-in ONNX
+embedding function) — no external API calls and no GPU required, so retrieval works fully
+offline once cached.
+
+### Choosing an LLM provider
+
+By default this project calls Claude (`LLM_PROVIDER=anthropic` in `.env`) — get a key at
+[console.anthropic.com](https://console.anthropic.com). This is what the grounding/citation
+prompt in `app/agent/prompts.py` was written and tested against, so it's the recommended
+default.
+
+If you'd rather not pay anything to test it, set `LLM_PROVIDER=nvidia` and `NVIDIA_API_KEY`
+(a free key from [build.nvidia.com](https://build.nvidia.com) → API Keys → Generate) to route
+chat turns through an NVIDIA-hosted open model (Llama by default — see `NVIDIA_MODEL` in
+`.env.example`) instead of Claude. It's a genuinely free option, but expect noticeably weaker
+adherence to the "answer only from context, cite sources" instructions than Claude gives —
+open models follow strict grounding instructions less reliably. NVIDIA's free-tier catalog
+changes over time; if `NVIDIA_MODEL`'s default stops working, check the current model list at
+build.nvidia.com and update it.
+
+Both providers plug into the same `/chat` endpoint through `app/agent/router.py` — switching
+is a `.env` change, not a code change.
 
 Verify it's up:
 
@@ -108,9 +130,13 @@ Open `http://localhost:5173`.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | **Required** for actual answers. Without it, `/chat` still runs and returns a graceful "not configured" escalation instead of crashing. |
-| `AGENT_MODEL` | `claude-sonnet-4-6` | Model used to generate grounded answers. |
+| `LLM_PROVIDER` | `anthropic` | `anthropic` or `nvidia` — see "Choosing an LLM provider" above. |
+| `ANTHROPIC_API_KEY` | — | Required when `LLM_PROVIDER=anthropic`. Without it, `/chat` still runs and returns a graceful "not configured" escalation instead of crashing. |
+| `AGENT_MODEL` | `claude-sonnet-4-6` | Model used to generate grounded answers (Anthropic provider only). |
 | `CLASSIFIER_MODEL` | `claude-haiku-4-5` | Reserved for Phase 4's cheap intent/safety classifier. |
+| `NVIDIA_API_KEY` | — | Required when `LLM_PROVIDER=nvidia`. Free key from build.nvidia.com. |
+| `NVIDIA_BASE_URL` | `https://integrate.api.nvidia.com/v1` | NVIDIA's OpenAI-compatible endpoint. |
+| `NVIDIA_MODEL` | `meta/llama-3.1-70b-instruct` | Model used when `LLM_PROVIDER=nvidia` — check build.nvidia.com for current availability. |
 | `DATABASE_URL` | `sqlite:///./support_agent.db` | Swap for a `postgresql://...` URL in production — the schema is driver-agnostic. |
 | `CHROMA_DIR` | `./chroma_data` | Where the vector index persists on disk. |
 | `KNOWLEDGE_BASE_DIR` | `./knowledge_base` | Folder scanned by the ingestion script. |
@@ -191,11 +217,13 @@ that's fine for testing, and swappable for a hosted Postgres later via `DATABASE
    - **Build Command**: `pip install -r requirements.txt`
    - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
    - **Instance Type**: Free is fine for testing
-3. Add environment variables (Render's env var UI, not a file):
+3. Add environment variables (Render's env var UI, not a file). For Claude (default):
    `ANTHROPIC_API_KEY` (your key — never commit this), `AGENT_MODEL=claude-sonnet-4-6`,
-   `CORS_ORIGINS=*` (tighten this in step 3 below once you have a Vercel URL). The rest
-   (`DATABASE_URL`, `CHROMA_DIR`, `KNOWLEDGE_BASE_DIR`, `RETRIEVAL_CONFIDENCE_THRESHOLD`) are
-   optional — the built-in defaults in `app/config.py` already work on Render as-is.
+   `CORS_ORIGINS=*` (tighten this in step 3 below once you have a Vercel URL). To use the free
+   NVIDIA option instead, set `LLM_PROVIDER=nvidia` and `NVIDIA_API_KEY` in place of the
+   Anthropic vars — see "Choosing an LLM provider" above. The rest (`DATABASE_URL`,
+   `CHROMA_DIR`, `KNOWLEDGE_BASE_DIR`, `RETRIEVAL_CONFIDENCE_THRESHOLD`) are optional — the
+   built-in defaults in `app/config.py` already work on Render as-is.
 4. Deploy. Once live, note the public URL — something like
    `https://support-agent-backend.onrender.com`.
 5. Verify: `curl https://<your-render-url>/health` and `curl https://<your-render-url>/kb/docs`.

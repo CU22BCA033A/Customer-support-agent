@@ -2,6 +2,7 @@ import logging
 
 import anthropic
 
+from app.agent.errors import AgentError
 from app.agent.prompts import RAG_SYSTEM_PROMPT, build_context_block, build_user_turn
 from app.config import get_settings
 
@@ -16,10 +17,6 @@ def _get_client() -> anthropic.Anthropic:
         settings = get_settings()
         _client = anthropic.Anthropic(api_key=settings.anthropic_api_key or None)
     return _client
-
-
-class AgentError(Exception):
-    """Raised when the LLM call fails outright (auth, network, rate limit, ...)."""
 
 
 def generate_grounded_answer(
