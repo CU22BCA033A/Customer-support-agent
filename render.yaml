@@ -1,0 +1,38 @@
+# Render Blueprint — deploys the FastAPI backend as a web service.
+# https://render.com/docs/blueprint-spec
+#
+# The frontend (frontend/) is NOT deployed by this file — deploy it to Vercel
+# separately (see README.md#deploying).
+
+services:
+  - type: web
+    name: support-agent-backend
+    env: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false # set this manually in the Render dashboard — never commit it
+      - key: AGENT_MODEL
+        value: claude-sonnet-4-6
+      - key: CLASSIFIER_MODEL
+        value: claude-haiku-4-5
+      # SQLite lives on local disk, which Render's free tier does not persist
+      # across deploys/restarts. That's fine for testing (conversation
+      # history resets on redeploy); for anything longer-lived, point this at
+      # a hosted Postgres URL instead (e.g. a free Render Postgres instance).
+      - key: DATABASE_URL
+        value: sqlite:///./support_agent.db
+      - key: CHROMA_DIR
+        value: ./chroma_data
+      - key: KNOWLEDGE_BASE_DIR
+        value: ./knowledge_base
+      - key: RETRIEVAL_CONFIDENCE_THRESHOLD
+        value: "0.35"
+      # Update this to your deployed Vercel URL (e.g. https://your-app.vercel.app)
+      # once the frontend is live — see README.md#deploying.
+      - key: CORS_ORIGINS
+        value: "*"

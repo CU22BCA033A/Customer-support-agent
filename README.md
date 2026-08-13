@@ -169,6 +169,63 @@ Tests cover the chunking pipeline directly and the `/chat` endpoint with the vec
 Claude client mocked, so the suite runs offline with no API key and no embedding-model
 download required.
 
+## Deploying
+
+The backend needs a real filesystem it can write to on boot (for the Chroma index) — that
+rules out plain Vercel serverless functions, which have no persistent local disk between
+invocations. The split that works cleanly: **backend on Render, frontend on Vercel.**
+
+The backend rebuilds its entire vector index from `knowledge_base/*.md` on every process
+start (see the `lifespan` handler in `app/main.py`), so it needs no persistent disk at all —
+a fresh container with nothing on it becomes fully functional within a few seconds of boot.
+SQLite conversation history is the one thing that resets on redeploy on Render's free tier;
+that's fine for testing, and swappable for a hosted Postgres later via `DATABASE_URL`.
+
+### 1. Backend → Render
+
+1. In the [Render dashboard](https://dashboard.render.com/), **New → Web Service**, point it
+   at this repo.
+2. Set:
+   - **Root Directory**: `backend`
+   - **Runtime**: Python 3
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - **Instance Type**: Free is fine for testing
+3. Add environment variables (Render's env var UI, not a file):
+   `ANTHROPIC_API_KEY` (your key — never commit this), `AGENT_MODEL=claude-sonnet-4-6`,
+   `CORS_ORIGINS=*` (tighten this in step 3 below once you have a Vercel URL). The rest
+   (`DATABASE_URL`, `CHROMA_DIR`, `KNOWLEDGE_BASE_DIR`, `RETRIEVAL_CONFIDENCE_THRESHOLD`) are
+   optional — the built-in defaults in `app/config.py` already work on Render as-is.
+4. Deploy. Once live, note the public URL — something like
+   `https://support-agent-backend.onrender.com`.
+5. Verify: `curl https://<your-render-url>/health` and `curl https://<your-render-url>/kb/docs`.
+
+A `render.yaml` Blueprint is also included at the repo root as a shortcut (**New → Blueprint**
+instead of **New → Web Service**) — it encodes the same settings so you don't have to type them
+in by hand. Use whichever you're more comfortable with; if the Blueprint's YAML schema has
+drifted from what your Render account expects, the manual steps above are the reliable fallback.
+
+Render's free tier spins the service down after inactivity; the first request after a while
+will be slow (cold start + re-ingestion) and fast after that.
+
+### 2. Frontend → Vercel
+
+1. In the [Vercel dashboard](https://vercel.com/new), import this same GitHub repo.
+2. Set **Root Directory** to `frontend` (this repo is a monorepo — the widget lives in a
+   subfolder, not at the repo root). `frontend/vercel.json` pins the build command and output
+   directory; Vercel's Vite preset handles the rest.
+3. Add an environment variable: `VITE_API_BASE` = your Render URL from step 1
+   (e.g. `https://support-agent-backend.onrender.com`). Vite bakes `VITE_`-prefixed vars in at
+   *build* time, so this must be set before deploying, not after.
+4. Deploy. Vercel gives you a URL like `https://your-app.vercel.app`.
+
+### 3. Connect the two
+
+Go back to the Render service's environment variables and set `CORS_ORIGINS` to your Vercel
+URL (e.g. `https://your-app.vercel.app`) instead of the wildcard `*` the blueprint ships with
+for initial testing — this is what allows the browser-based widget to actually call the API.
+Redeploy the backend for the change to take effect, then open the Vercel URL and chat.
+
 ## Roadmap
 
 Built so far (**Phase 1**): ingestion pipeline, heading-based chunking, Chroma retrieval,
