@@ -128,10 +128,17 @@ def classify_intent(message: str) -> str:
     keep the free-tier setup to a single API key/model).
     """
     try:
+        # 30 tokens of headroom (not the theoretical minimum) -- open-model chat
+        # templates often prepend whitespace/punctuation as separate tokens
+        # before the actual word, and a too-tight budget risks truncating
+        # "general" mid-word, which would silently and incorrectly fall
+        # through to the "policy" (escalate) branch below.
         response = _call(
-            CLASSIFIER_SYSTEM_PROMPT, [{"role": "user", "content": message}], max_tokens=5
+            CLASSIFIER_SYSTEM_PROMPT, [{"role": "user", "content": message}], max_tokens=30
         )
     except AgentError as e:
         logger.warning("Intent classification failed, defaulting to 'policy': %s", e)
         return "policy"
-    return "general" if "general" in _text_of(response).lower() else "policy"
+    raw = _text_of(response)
+    logger.info("classify_intent(%r) -> raw model output: %r", message, raw)
+    return "general" if "general" in raw.lower() else "policy"

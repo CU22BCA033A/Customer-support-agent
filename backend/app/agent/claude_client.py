@@ -95,13 +95,17 @@ def classify_intent(message: str) -> str:
     """Return "policy" or "general". Fails safe to "policy" on any error."""
     settings = get_settings()
     try:
+        # 30 tokens of headroom, not the theoretical minimum -- see the NVIDIA
+        # client's comment on this same constant for why a tighter budget is risky.
         response = _call(
             settings.classifier_model,
             CLASSIFIER_SYSTEM_PROMPT,
             [{"role": "user", "content": message}],
-            max_tokens=5,
+            max_tokens=30,
         )
     except AgentError as e:
         logger.warning("Intent classification failed, defaulting to 'policy': %s", e)
         return "policy"
-    return "general" if "general" in _text_of(response).lower() else "policy"
+    raw = _text_of(response)
+    logger.info("classify_intent(%r) -> raw model output: %r", message, raw)
+    return "general" if "general" in raw.lower() else "policy"
