@@ -30,8 +30,8 @@ export default function ChatWidget() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);
 
-  async function sendMessage() {
-    const text = input.trim();
+  async function sendMessage(overrideText) {
+    const text = (overrideText ?? input).trim();
     if (!text || loading) return;
 
     setMessages((prev) => [...prev, { role: "user", content: text, citations: [] }]);
@@ -101,9 +101,18 @@ export default function ChatWidget() {
               {m.citations?.length > 0 && (
                 <div className="citations">
                   {m.citations.map((c, j) => (
-                    <span key={j} className="citation-chip" title={`match score ${c.score}`}>
+                    <button
+                      key={j}
+                      type="button"
+                      className="citation-chip"
+                      title={`Ask more about this source (match score ${c.score})`}
+                      disabled={loading}
+                      onClick={() =>
+                        sendMessage(`Tell me more about "${c.heading}" in the ${c.doc}.`)
+                      }
+                    >
                       {c.doc} › {c.heading}
-                    </span>
+                    </button>
                   ))}
                 </div>
               )}
@@ -132,7 +141,7 @@ export default function ChatWidget() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
         />
-        <button onClick={sendMessage} disabled={loading || !input.trim()}>
+        <button onClick={() => sendMessage()} disabled={loading || !input.trim()}>
           Send
         </button>
       </div>

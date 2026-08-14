@@ -112,11 +112,24 @@ body {
 
 .citation-chip {
   font-size: 11.5px;
+  font-family: inherit;
   background: #eef1ff;
   color: #3b47c4;
   padding: 3px 8px;
   border-radius: 999px;
   border: 1px solid #dde0fb;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.citation-chip:hover:not(:disabled) {
+  background: #dde0fb;
+  border-color: #c3c9f7;
+}
+
+.citation-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .escalated-tag {
