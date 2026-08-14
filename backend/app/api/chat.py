@@ -3,7 +3,7 @@ import time
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.agent.router import AgentError, generate_grounded_answer
+from app.agent.router import AgentError, classify_intent, generate_general_answer, generate_grounded_answer
 from app.agent.smalltalk import smalltalk_reply
 from app.config import get_settings
 from app.db import get_db
@@ -32,6 +32,7 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     escalation_reason: str | None = None
     retrieved = []
     top_score = 0.0
+    grounded = False  # only True when `answer` actually cites `retrieved`
 
     canned = smalltalk_reply(req.message)
     if canned is not None:
@@ -45,13 +46,31 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
         top_score = retrieved[0].score if retrieved else 0.0
 
         if not retrieved or top_score < settings.retrieval_confidence_threshold:
-            answer = NO_MATCH_MESSAGE
-            escalated = True
-            escalation_reason = "low_retrieval_confidence"
+            # Low/no retrieval match doesn't necessarily mean "out of scope" --
+            # it could be general conversation the KB was never going to cover.
+            # Classify before deciding whether to escalate or just chat: a
+            # policy-shaped question with no grounding still escalates rather
+            # than risk an invented answer; a general question gets answered
+            # normally, just without citations.
+            intent = classify_intent(req.message)
+            if intent == "general":
+                try:
+                    answer = generate_general_answer(req.message, history)
+                except AgentError as e:
+                    answer = (
+                        f"{e} I've noted this so a human agent can follow up — sorry for the trouble."
+                    )
+                    escalated = True
+                    escalation_reason = "agent_error"
+            else:
+                answer = NO_MATCH_MESSAGE
+                escalated = True
+                escalation_reason = "low_retrieval_confidence"
         else:
             chunk_dicts = [{"doc": r.doc, "heading": r.heading, "text": r.text} for r in retrieved]
             try:
                 answer = generate_grounded_answer(req.message, history, chunk_dicts)
+                grounded = True
             except AgentError as e:
                 answer = (
                     f"{e} I've noted this so a human agent can follow up — sorry for the trouble."
@@ -80,9 +99,9 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     db.commit()
 
     citations = (
-        []
-        if escalated
-        else [Citation(doc=r.doc, heading=r.heading, score=r.score) for r in retrieved]
+        [Citation(doc=r.doc, heading=r.heading, score=r.score) for r in retrieved]
+        if grounded
+        else []
     )
 
     return ChatResponse(

@@ -1,10 +1,12 @@
 # AI Customer Support Agent
 
-A self-hosted AI customer support agent built on FastAPI, ChromaDB, and the Claude API.
-Answers customer questions by retrieving grounded context from a markdown knowledge base
-and citing its sources — it never answers policy/product questions from general model
-knowledge, and it says so honestly (and offers to escalate) when it can't find anything
-relevant.
+A self-hosted AI customer support agent built on FastAPI, ChromaDB, and Claude (or NVIDIA's
+free NIM models — see [Choosing an LLM provider](#choosing-an-llm-provider)). Answers customer
+questions by retrieving grounded context from a markdown knowledge base and citing its
+sources — it never answers *policy/product* questions from general model knowledge. It'll
+still chat normally about anything else (greetings, general-knowledge questions), but a
+lightweight classifier keeps that separate from the strict, cited, policy-grounded path so the
+two never blur together.
 
 **Status: Phase 1 (knowledge base + RAG chat) is built and working end-to-end.** Tool use
 (order lookup, refunds), conversation memory summarization, guardrails, and the admin
@@ -16,26 +18,37 @@ dashboard are follow-on phases — see [Roadmap](#roadmap) below.
 User message
    │
    ▼
+[Greeting/thanks/farewell?] ── yes → canned reply, no retrieval, no LLM call
+   │ no
+   ▼
 [Retrieval Layer] ── embeds query → searches Chroma → returns top-k chunks + similarity score
    │
    ▼
-[Confidence gate] ── top score < threshold? → honest "I don't know" + escalated:true, no LLM call
-   │  (score OK)
-   ▼
-[Claude] ── answers ONLY from the retrieved chunks, with inline citations
-   │
-   ▼
-[Response + citations + escalated flag]
+[Confidence gate] ── top score >= threshold?
+   │ no                                          │ yes
+   ▼                                              ▼
+[Classifier] ── policy-shaped question?    [LLM] ── answers ONLY from the retrieved
+   │ yes            │ no                          chunks, with inline citations
+   ▼                ▼
+"I don't know,   [LLM] ── answers freely,
+ escalate?"        no citations, no KB claims
+   │                │
+   └────────┬───────┘
+            ▼
+[Response + citations (grounded path only) + escalated flag]
    │
    ▼
 [Audit log] ── query, retrieved chunks + scores, confidence, answer, latency — every turn
 ```
 
 The confidence gate is enforced in code (`backend/app/api/chat.py`), not just in the system
-prompt — if retrieval doesn't clear `RETRIEVAL_CONFIDENCE_THRESHOLD`, the LLM is never called
-and the user gets an honest, deterministic "I don't know, want me to escalate?" response. This
-guarantees no hallucination on out-of-scope questions even if a prompt-level instruction were
-ever bypassed.
+prompt — if retrieval doesn't clear `RETRIEVAL_CONFIDENCE_THRESHOLD`, the grounded-answer LLM
+call never happens. Below that threshold, a message is either genuinely out of scope for the
+knowledge base (routed to escalation) or just general conversation the KB was never going to
+cover (routed to a normal, ungrounded chat reply) — a small classifier call tells those apart.
+Either way, the strict "answer only from retrieved context, cite your sources" path only ever
+runs when there's actually retrieved context to ground it in, so a policy question with no
+matching documentation can't get an invented answer.
 
 ## Project layout
 
