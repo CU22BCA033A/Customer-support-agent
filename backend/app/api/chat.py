@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.agent.router import AgentError, generate_grounded_answer
+from app.agent.smalltalk import smalltalk_reply
 from app.config import get_settings
 from app.db import get_db
 from app.models import Conversation, Message, RetrievalAuditLog
@@ -27,27 +28,36 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     conversation = _get_or_create_conversation(db, req.conversation_id, req.session_id)
     history = _load_history(db, conversation.id)
 
-    store = get_vector_store()
-    retrieved = store.query(req.message, top_k=settings.retrieval_top_k)
-    top_score = retrieved[0].score if retrieved else 0.0
-
     escalated = False
     escalation_reason: str | None = None
+    retrieved = []
+    top_score = 0.0
 
-    if not retrieved or top_score < settings.retrieval_confidence_threshold:
-        answer = NO_MATCH_MESSAGE
-        escalated = True
-        escalation_reason = "low_retrieval_confidence"
+    canned = smalltalk_reply(req.message)
+    if canned is not None:
+        # Plain greeting/thanks/farewell — not a policy question, so skip
+        # retrieval entirely rather than let it fall through the confidence
+        # gate and escalate on a bare "hi".
+        answer = canned
     else:
-        chunk_dicts = [{"doc": r.doc, "heading": r.heading, "text": r.text} for r in retrieved]
-        try:
-            answer = generate_grounded_answer(req.message, history, chunk_dicts)
-        except AgentError as e:
-            answer = (
-                f"{e} I've noted this so a human agent can follow up — sorry for the trouble."
-            )
+        store = get_vector_store()
+        retrieved = store.query(req.message, top_k=settings.retrieval_top_k)
+        top_score = retrieved[0].score if retrieved else 0.0
+
+        if not retrieved or top_score < settings.retrieval_confidence_threshold:
+            answer = NO_MATCH_MESSAGE
             escalated = True
-            escalation_reason = "agent_error"
+            escalation_reason = "low_retrieval_confidence"
+        else:
+            chunk_dicts = [{"doc": r.doc, "heading": r.heading, "text": r.text} for r in retrieved]
+            try:
+                answer = generate_grounded_answer(req.message, history, chunk_dicts)
+            except AgentError as e:
+                answer = (
+                    f"{e} I've noted this so a human agent can follow up — sorry for the trouble."
+                )
+                escalated = True
+                escalation_reason = "agent_error"
 
     latency_ms = int((time.monotonic() - started) * 1000)
 

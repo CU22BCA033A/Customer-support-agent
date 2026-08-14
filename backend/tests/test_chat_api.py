@@ -19,6 +19,19 @@ def test_health():
     assert client.get("/health").json() == {"status": "ok"}
 
 
+@patch("app.api.chat.generate_grounded_answer")
+@patch("app.api.chat.get_vector_store")
+def test_greeting_skips_retrieval_and_llm_entirely(mock_store, mock_llm):
+    resp = client.post("/chat", json={"message": "hi", "session_id": "s3"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["escalated"] is False
+    assert body["citations"] == []
+    assert "support assistant" in body["answer"].lower()
+    mock_store.return_value.query.assert_not_called()
+    mock_llm.assert_not_called()
+
+
 @patch("app.api.chat.get_vector_store")
 def test_low_confidence_query_escalates_without_calling_llm(mock_store):
     mock_store.return_value.query.return_value = [
